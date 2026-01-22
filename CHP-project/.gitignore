@@ -2,3 +2,5 @@
 *.pth
 *.pdf
 .tmp_*
+
+/Users/ijongseung/Documents/GitHub/Heat-Demand/CHP-project/#5_대회준비_모델링_간단하게 처리.Ipynb
