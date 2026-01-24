@@ -1,7 +1,8 @@
 # GLAM: A Hybrid GAM-LSTM Framework for District Heat Demand Forecasting
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
+[![uv](https://img.shields.io/badge/uv-package%20manager-blueviolet.svg)](https://github.com/astral-sh/uv)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## 📋 Overview
@@ -142,12 +143,14 @@ The encoder-decoder architecture:
 
 ```
 GLAM/
-├── 📓 GLAM_sector_1.ipynb    # Main implementation notebook
-├── 📄 README.md              # This file
+├── 📓 GLAM_sector_1.ipynb       # Main implementation notebook
+├── 📄 README.md                 # This file
+├── 📦 pyproject.toml            # Project configuration & dependencies
+├── 🔒 uv.lock                   # Locked dependencies (auto-generated)
 ├── 📊 data/
 │   └── whole-CHP-plant-data-ver2.csv  # Heat demand dataset
 └── 📈 results/
-    └── best_lstm_model.pth   # Trained model weights
+    └── best_lstm_model.pth      # Trained model weights
 ```
 
 ---
@@ -156,22 +159,105 @@ GLAM/
 
 ### Prerequisites
 
+This project uses [**uv**](https://github.com/astral-sh/uv) for fast, reliable Python package management.
+
+#### Install uv
+
 ```bash
-pip install numpy pandas matplotlib seaborn scikit-learn torch pygam workalendar
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Or via Homebrew (macOS)
+brew install uv
 ```
 
-### Dependencies
+### Installation
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/your-username/GLAM.git
+cd GLAM
+
+# 2. Sync dependencies (creates venv and installs all packages)
+uv sync
+
+# 3. (Optional) Install development dependencies
+uv sync --all-extras
+```
+
+### Running the Notebook
+
+```bash
+# Activate the virtual environment and run Jupyter
+uv run jupyter notebook GLAM_sector_1.ipynb
+
+# Or use JupyterLab
+uv run jupyter lab
+```
+
+---
+
+## 📦 Dependencies
+
+All dependencies are managed via `pyproject.toml`:
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `numpy` | ≥1.21 | Numerical operations |
-| `pandas` | ≥1.3 | Data manipulation |
-| `torch` | ≥2.0 | Deep learning framework |
-| `pygam` | ≥0.8 | Generalized Additive Models |
-| `workalendar` | ≥16.0 | Korean holiday calendar |
-| `scikit-learn` | ≥1.0 | ML utilities |
+| `numpy` | ≥1.24.0 | Numerical operations |
+| `pandas` | ≥2.0.0 | Data manipulation |
+| `torch` | ≥2.0.0 | Deep learning framework |
+| `pygam` | ≥0.9.0 | Generalized Additive Models |
+| `workalendar` | ≥17.0.0 | Korean holiday calendar |
+| `scikit-learn` | ≥1.3.0 | ML utilities |
+| `matplotlib` | ≥3.7.0 | Visualization |
+| `seaborn` | ≥0.12.0 | Statistical visualization |
 
-### Running the Model
+### Adding New Dependencies
+
+```bash
+# Add a production dependency
+uv add package-name
+
+# Add a development dependency
+uv add --dev package-name
+
+# Update all dependencies
+uv lock --upgrade
+```
+
+---
+
+## 🔧 Common uv Commands
+
+```bash
+# Sync dependencies from lock file
+uv sync
+
+# Run any Python script
+uv run python your_script.py
+
+# Run Jupyter notebook
+uv run jupyter notebook
+
+# Add a new package
+uv add package-name
+
+# Remove a package
+uv remove package-name
+
+# Update lock file
+uv lock
+
+# Show dependency tree
+uv tree
+```
+
+---
+
+## 💻 Running the Model
 
 ```python
 # 1. Load and preprocess data
@@ -355,23 +441,11 @@ GLAM provides component-wise interpretability:
 
 ## 📚 Citation
 
-If you use this code in your research, please cite:
-
-```bibtex
-@article{lee2025glam,
-  title={GLAM: A Hybrid GAM-LSTM Framework for District Heat Demand Forecasting},
-  author={Lee, Chae-Yeon and Lee, Jong-Seung},
-  journal={Energy Reports},
-  year={2025},
-  publisher={Elsevier}
-}
-```
 
 ---
 
 ## 📬 Contact
 
-- **Chae-Yeon Lee**: ange0701@gachon.ac.kr
 - **Jong-Seung Lee** (Corresponding): new9279@gachon.ac.kr
 
 **Affiliation**: Department of Next Generation Smart Energy System Convergence, Gachon University, Republic of Korea
