@@ -1,116 +1,390 @@
-GLAM: GAM–LSTM Additive Model
-=============================
+# GLAM: A Hybrid GAM-LSTM Framework for District Heat Demand Forecasting
 
-이 레포는 논문 "GLAM: A Hybrid GAM with LSTM Framework for District Heating Production Forecasting"
-의 아키텍처를 기반으로 한 구현/실험을 포함합니다. 핵심 아이디어는
-**구조적(해석 가능한) 성분**과 **잔차 동역학**을 분리해 예측 성능과 설명력을 동시에 확보하는 것입니다.
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-아키텍처 개요
--------------
+## 📋 Overview
 
-GLAM은 2‑Stage 구조입니다.
+**GLAM (GAM–LSTM Additive Model)** is a two-stage hybrid forecasting framework for district heating demand prediction. It combines the interpretability of Generalized Additive Models (GAM) with the temporal learning capability of Sequence-to-Sequence LSTM networks.
 
-Stage I: 구조적 베이스라인 (GAM)
---------------------------------
+### Key Innovation
+GLAM explicitly separates **deterministic structural patterns** from **stochastic residual dynamics**, enabling:
+- 🎯 **Interpretable** structural components (weather response, seasonality, trends)
+- 🧠 **Accurate** residual dynamics modeling via deep learning
+- ⏰ **Multi-horizon** forecasting for day-ahead operational planning (24-hour horizon)
 
-목표:
-  - 장기 추세, 날씨 비선형 반응, 다중 계절성, 사회적 주기(휴일/주말)를
-    해석 가능한 형태로 분리해 구조 성분 L_hat을 추정.
+---
 
-구성:
-  1) 추세 + 변경점 (changepoint)
-     - 선형 추세 + piecewise changepoint: (t - c_j)+
-     - 논문에서는 L1 패널티로 sparse changepoint를 유도.
-  2) 날씨 반응 (HDH)
-     - HDH = max(0, T_base - T)
-     - HDH에 대한 비선형 스무딩 (B‑spline)
-  3) 다중 계절성
-     - 연/일 주기: Fourier series (sin/cos)
-  4) 사회적 주기
-     - 주말/공휴일 indicator
+## 🏗️ Architecture
 
-구현 방식:
-  - GAM으로 trend + weather + seasonal + social 성분을 학습.
-  - changepoint는 L1(Lasso)로 따로 추정해 GAM 출력에 더함.
-    (pyGAM이 L1을 직접 지원하지 않기 때문)
+```mermaid
+flowchart TB
+    subgraph INPUT["📊 Input Data"]
+        A[("Heat Demand<br/>y_t")]
+        B[("Outdoor<br/>Temperature<br/>T_t")]
+        C[("Calendar<br/>Information")]
+    end
+    
+    subgraph PREPROCESS["🔧 Preprocessing"]
+        D["HDH/CDH<br/>Calculation<br/>(Eq. 3-4)"]
+        E["Fourier Features<br/>Daily/Yearly<br/>(Eq. 11-12)"]
+        F["Non-working Day<br/>Indicator I_off<br/>(Eq. 13)"]
+        G["Missing Value<br/>Imputation"]
+    end
+    
+    subgraph STAGE1["🔍 Stage I: Structural Modeling (GAM)"]
+        direction TB
+        H["Piecewise Linear Trend<br/>g_trend(t) with L1 Changepoints<br/>(Eq. 8-9)"]
+        I["HDH B-Spline<br/>f_heat(h_t)<br/>(Eq. 5)"]
+        J["CDH B-Spline<br/>f_cool(c_t)<br/>(Eq. 6)"]
+        K["Fourier Seasonality<br/>S_season(τ_t)<br/>(Eq. 10)"]
+        L["Social Cycles<br/>S_social(t)<br/>(Eq. 13)"]
+        M["Global Intercept μ"]
+        
+        H & I & J & K & L & M --> N["Structural Component<br/>L̂_t = μ + g_trend + f_heat + f_cool + S_season + S_social"]
+    end
+    
+    subgraph RESIDUAL["📉 Residual Extraction"]
+        O["Residual Calculation<br/>r_t = y_t - L̂_t<br/>(Eq. 15)"]
+        P["Standard Scaling<br/>for LSTM Input"]
+    end
+    
+    subgraph STAGE2["🧠 Stage II: Dynamic Modeling (Seq2Seq LSTM)"]
+        direction TB
+        Q["Encoder LSTM<br/>Process Lookback Window<br/>[r_{t-L+1}, ..., r_t]"]
+        R["Context State<br/>v_t = (h_t, c_t)<br/>(Eq. 17)"]
+        S["Decoder LSTM<br/>Generate H-step Corrections<br/>D̂_{t,h} for h=1,...,H"]
+        
+        Q --> R --> S
+    end
+    
+    subgraph OUTPUT["📈 Final Prediction"]
+        T["Inverse Scaling<br/>D̂_{t,h}"]
+        U["Recombination<br/>ŷ_{t+h} = L̂_{t+h} + D̂_{t,h}<br/>(Eq. 19)"]
+        V[("24-Hour Ahead<br/>Heat Demand<br/>Forecast")]
+    end
+    
+    A --> G
+    B --> D
+    C --> E & F
+    G --> N
+    D --> I & J
+    E --> K
+    F --> L
+    
+    N --> O
+    A --> O
+    O --> P --> Q
+    S --> T --> U
+    N --> U
+    U --> V
+    
+    style INPUT fill:#e1f5fe
+    style PREPROCESS fill:#fff3e0
+    style STAGE1 fill:#e8f5e9
+    style RESIDUAL fill:#fce4ec
+    style STAGE2 fill:#f3e5f5
+    style OUTPUT fill:#e0f2f1
+```
 
-Stage II: 잔차 동역학 (Seq2Seq LSTM)
------------------------------------
+---
 
-목표:
-  - Stage I 잔차 r_t = y_t - L_hat_t 에 남은 관성/단기 의존성 학습.
-  - 다시간(H‑step) 예측을 위해 Seq2Seq LSTM 사용.
+## 📐 Mathematical Formulation
 
-구성:
-  - 입력: 과거 L 길이의 잔차 시퀀스
-  - 출력: H 길이의 잔차 보정치 D_hat
-  - 최종 예측: y_hat = L_hat + D_hat
+### Core Decomposition (Eq. 1)
+The heat demand is decomposed as:
 
-데이터 처리/피처
----------------
+$$y_t = L_t + D_t + \epsilon_t$$
 
-필수 컬럼:
-  - date, heat_demand, imputated_temperature
+Where:
+- $L_t$: Structural component (deterministic patterns)
+- $D_t$: Dynamic residual (stochastic temporal dependence)
+- $\epsilon_t$: White noise
 
-피처:
-  - t (시간 인덱스)
-  - HDH (Heating Degree Hours)
-  - Fourier terms (daily/yearly)
-  - is_non_working (주말/공휴일)
-  - changepoint hinge features (cp_j)
+### Stage I: Structural Component (Eq. 2)
 
-학습/평가 프로토콜
-------------------
+$$L_t = \mu + g_{\text{trend}}(t) + f_{\text{heat}}(h_t) + f_{\text{cool}}(c_t) + S_{\text{season}}(\tau_t) + S_{\text{social}}(t)$$
 
-논문 프로토콜:
-  - Rolling-origin 방식 권장 (각 cutoff마다 Stage I/II 재학습).
+| Component | Description | Equation |
+|-----------|-------------|----------|
+| $\mu$ | Global intercept | Baseline level |
+| $g_{\text{trend}}(t)$ | Piecewise linear trend | $\beta_1 t + \sum_{j=1}^{K} \delta_j (t - c_j)_+$ |
+| $f_{\text{heat}}(h_t)$ | HDH nonlinear response | Penalized B-spline (Eq. 5) |
+| $f_{\text{cool}}(c_t)$ | CDH nonlinear response | Penalized B-spline (Eq. 6) |
+| $S_{\text{season}}(\tau_t)$ | Daily + Yearly seasonality | Fourier terms (Eq. 11-12) |
+| $S_{\text{social}}(t)$ | Weekend/Holiday effects | $\gamma_{\text{off}} \cdot I_{\text{off}}(t)$ |
 
-현재 노트북 기준:
-  - Sliding-window 방식으로 구현 가능.
-  - Sliding-window = 고정 길이 윈도우만 학습 (누적 학습 아님).
-  - non‑overlap 여부는 STRIDE 값으로 결정:
-      * STRIDE == HORIZON  -> non‑overlap
-      * STRIDE == 1        -> overlap
+### Weather Encoding (Eq. 3-4)
 
-하이퍼파라미터 탐색
--------------------
+$$h_t = \max(0, T_{\text{base}} - T_t) \quad \text{(Heating Degree Hours)}$$
 
-Stage I:
-  - Fourier 차수 K_daily, K_yearly
-  - changepoint 개수 K_cp
-  - n_splines (HDH 스무딩)
-  - smoothing lambda (pyGAM gridsearch)
+$$c_t = \max(0, T_t - T_{\text{base}}) \quad \text{(Cooling Degree Hours)}$$
 
-Stage II:
-  - hidden_size, num_layers, dropout, lr, batch_size 등
-  - teacher forcing 비율
+Where $T_{\text{base}} = 18°C$
 
-파일 구성
----------
+### Stage II: Seq2Seq LSTM
 
-주요 파일:
-  - GLAM_implementation.ipynb
-    * 논문 구조 기반 Stage I/II 구현
-    * 구조/잔차 분리, GAM + LSTM 통합 예측
-  - #5_대회준비_모델링.Ipynb
-    * 대회용 베이스라인/실험 기록 (논문 구조와는 차이 있음)
-  - gangnam_CHP.csv
-    * 입력 데이터
-  - GLAM (1).pdf
-    * 논문 원문
+The encoder-decoder architecture:
 
-실행 흐름 (권장 순서)
----------------------
+1. **Encoder**: Processes lookback window of residuals
+   $$v_t = \text{Encoder}([r_{t-L+1}, ..., r_t]) = (h_t, c_t)$$
 
-1) 데이터 로드 및 HDH/Calendar feature 생성
-2) Fourier/Changepoint 구조 탐색
-3) Stage I (GAM) 학습 + Lasso changepoint
-4) Stage I 잔차 계산
-5) Stage II (Seq2Seq LSTM) 학습
-6) 통합 예측 (L_hat + D_hat)
-7) Sliding/Rolling 평가
+2. **Decoder**: Generates multi-horizon corrections
+   $$\hat{D}_{t,h} = \text{Decoder}(v_t) \quad \text{for } h = 1, ..., H$$
 
-비고
-----
-- changepoint는 논문에서 L1 패널티를 사용하므로 Lasso 방식으로 분리 구현.
-- pyGAM의 smoothing lambda는 gridsearch로 튜닝 가능.
+3. **Final Prediction** (Eq. 19):
+   $$\hat{y}_{t+h} = \hat{L}_{t+h} + \hat{D}_{t,h}$$
+
+---
+
+## 📁 Project Structure
+
+```
+GLAM/
+├── 📓 GLAM_sector_1.ipynb    # Main implementation notebook
+├── 📄 README.md              # This file
+├── 📊 data/
+│   └── whole-CHP-plant-data-ver2.csv  # Heat demand dataset
+└── 📈 results/
+    └── best_lstm_model.pth   # Trained model weights
+```
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+```bash
+pip install numpy pandas matplotlib seaborn scikit-learn torch pygam workalendar
+```
+
+### Dependencies
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `numpy` | ≥1.21 | Numerical operations |
+| `pandas` | ≥1.3 | Data manipulation |
+| `torch` | ≥2.0 | Deep learning framework |
+| `pygam` | ≥0.8 | Generalized Additive Models |
+| `workalendar` | ≥16.0 | Korean holiday calendar |
+| `scikit-learn` | ≥1.0 | ML utilities |
+
+### Running the Model
+
+```python
+# 1. Load and preprocess data
+df = pd.read_csv('data/whole-CHP-plant-data-ver2.csv')
+df['date'] = pd.to_datetime(df['date'])
+
+# 2. Feature Engineering
+df = add_fourier_features(df, 'date', P_DAILY=24, K_d=5, prefix='daily')
+df = add_fourier_features(df, 'date', P_YEARLY=8766, K_y=15, prefix='yearly')
+df['I_off'] = create_nonworking_indicator(df, 'date')
+
+# 3. Stage I: GAM fitting
+gam = LinearGAM(terms)
+gam.gridsearch(X_train, y_train)
+L_hat = gam.predict(X)
+
+# 4. Residual extraction
+residual = y - L_hat
+
+# 5. Stage II: LSTM training
+model = Seq2SeqLSTM(hidden_size=192, num_layers=1)
+# Train on residuals...
+
+# 6. Final prediction
+y_pred = L_hat_future + D_hat
+```
+
+---
+
+## 📊 Data Description
+
+### Dataset
+- **Source**: Korea Meteorological Administration (KMA) Weather Big Data Contest
+- **Period**: January 2021 – December 2024
+- **Resolution**: Hourly
+- **Branches**: 18 district heating branches (Pyeongtaek excluded due to data quality issues)
+
+### Variables
+
+| Variable | Unit | Description |
+|----------|------|-------------|
+| Heat Demand ($D_t$) | MW | Hourly heat demand per branch |
+| Outdoor Temperature ($T_t$) | °C | Hourly outdoor air temperature |
+| HDH ($h_t$) | °C·h | Heating Degree Hours (engineered) |
+| CDH ($c_t$) | °C·h | Cooling Degree Hours (engineered) |
+| Non-working Day ($I_{\text{off}}$) | {0,1} | Weekend/holiday indicator |
+
+### Branch Stratification
+
+Branches are classified by Summer-to-Winter Ratio (SWR):
+
+$$SWR = \frac{E[D_t | t \in \text{Jun-Aug}]}{E[D_t | t \in \text{Dec-Feb}]}$$
+
+- **Case 1** (SWR < 0.25): Heating-dominant with near-baseline summer demand
+- **Case 2** (SWR ≥ 0.25): Elevated summer loads with CDH response
+
+---
+
+## ⚙️ Hyperparameters
+
+### Stage I (GAM)
+
+| Parameter | Search Space | Best Value |
+|-----------|--------------|------------|
+| $K_d$ (Daily Fourier order) | [2, 3, 4, 5] | 5 |
+| $K_y$ (Yearly Fourier order) | [5, 10, 15] | 15 |
+| $K_{cp}$ (Changepoints) | [5, 10, 15, 20] | 5 |
+| $n_{\text{splines}}$ (B-spline basis) | [10, 15, 20, 25] | 10 |
+| $\lambda$ (Smoothing) | logspace(-3, 3, 7) | Grid search |
+
+### Stage II (LSTM)
+
+| Parameter | Search Space | Best Value |
+|-----------|--------------|------------|
+| Hidden size | [32, 64, 96, 128, 192] | 192 |
+| Number of layers | [1, 2, 3] | 1 |
+| Dropout | [0.0, 0.1, 0.2, 0.3] | 0.0 |
+| Learning rate | [1e-4, 3e-3] | 4.6e-4 |
+| Batch size | [16, 32, 64] | 64 |
+| Teacher forcing ratio | [0.2, 0.4, 0.6] | 0.2 |
+| Lookback window | - | 168 hours (7 days) |
+| Forecast horizon | - | 24 hours |
+
+---
+
+## 📈 Results
+
+### Stage I Performance (GAM Only)
+
+| Metric | Test Set |
+|--------|----------|
+| RMSE | 45.13 MW |
+| MAE | 36.04 MW |
+| R² | 0.9408 |
+
+### Stage I + II Performance (GLAM)
+
+| Metric | Test Set |
+|--------|----------|
+| RMSE | ~28.7 MW |
+| MAE | ~22.1 MW |
+| R² | ~0.976 |
+
+---
+
+## 🔬 Key Implementation Details
+
+### 1. Missing Value Imputation
+- **Short gaps (≤2 days)**: Quadratic spline interpolation
+- **Long gaps (>2 days)**: Historical averaging (same month, day, hour)
+
+### 2. Changepoint Regularization (Eq. 9)
+L1 penalty for sparse changepoints:
+$$\mathcal{P}_{cp}(\boldsymbol{\delta}) = \lambda_{cp} \sum_{j=1}^{K} |\delta_j|$$
+
+### 3. Teacher Forcing
+During LSTM training, teacher forcing ratio decays to improve inference stability.
+
+### 4. Residual Scaling
+StandardScaler is applied to residuals before LSTM training for numerical stability.
+
+---
+
+## 📂 Detailed Pipeline Flow
+
+```mermaid
+flowchart LR
+    subgraph DataPrep["1️⃣ Data Preparation"]
+        A1["Load CSV Data"] --> A2["Filter by Branch<br/>(e.g., Gangnam)"]
+        A2 --> A3["Time Index<br/>Assignment"]
+        A3 --> A4["Train/Val/Test Split<br/>(72.7%/13.6%/13.6%)"]
+    end
+    
+    subgraph FeatEng["2️⃣ Feature Engineering"]
+        B1["HDH: max(0, 18-T)"] 
+        B2["CDH: max(0, T-18)"]
+        B3["Daily Fourier<br/>K_d harmonics"]
+        B4["Yearly Fourier<br/>K_y harmonics"]
+        B5["Korean Holiday<br/>Calendar"]
+        B6["Changepoint<br/>Features (t-c_j)+"]
+    end
+    
+    subgraph Stage1Fit["3️⃣ Stage I Fitting"]
+        C1["Grid Search<br/>Hyperparameters"]
+        C2["GAM Fit on Train"]
+        C3["Lasso for<br/>Changepoints"]
+        C4["Compute L_hat"]
+        C5["Extract Residuals<br/>r = y - L_hat"]
+    end
+    
+    subgraph Stage2Fit["4️⃣ Stage II Fitting"]
+        D1["Scale Residuals<br/>(StandardScaler)"]
+        D2["Create Sequences<br/>(168→24)"]
+        D3["Random Search HP"]
+        D4["Train Seq2Seq LSTM"]
+        D5["Early Stopping<br/>on Val MSE"]
+    end
+    
+    subgraph Inference["5️⃣ Inference"]
+        E1["GAM Predict<br/>L_hat_future"]
+        E2["LSTM Predict<br/>D_hat_scaled"]
+        E3["Inverse Scale"]
+        E4["Recombine<br/>y_hat = L_hat + D_hat"]
+    end
+    
+    DataPrep --> FeatEng --> Stage1Fit --> Stage2Fit --> Inference
+```
+
+---
+
+## 🔍 Interpretability Features
+
+GLAM provides component-wise interpretability:
+
+1. **Trend Analysis**: Visualize long-term structural changes via changepoint coefficients
+2. **Weather Response Curves**: Plot $f_{\text{heat}}(h_t)$ and $f_{\text{cool}}(c_t)$ splines
+3. **Seasonality Decomposition**: Examine daily and yearly Fourier components
+4. **Holiday Effects**: Quantify $\gamma_{\text{off}}$ coefficient for demand reduction
+
+---
+
+## 📚 Citation
+
+If you use this code in your research, please cite:
+
+```bibtex
+@article{lee2025glam,
+  title={GLAM: A Hybrid GAM-LSTM Framework for District Heat Demand Forecasting},
+  author={Lee, Chae-Yeon and Lee, Jong-Seung},
+  journal={Energy Reports},
+  year={2025},
+  publisher={Elsevier}
+}
+```
+
+---
+
+## 📬 Contact
+
+- **Chae-Yeon Lee**: ange0701@gachon.ac.kr
+- **Jong-Seung Lee** (Corresponding): new9279@gachon.ac.kr
+
+**Affiliation**: Department of Next Generation Smart Energy System Convergence, Gachon University, Republic of Korea
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- Korea Meteorological Administration (KMA) Weather Big Data Contest for providing the dataset
+- Energy AX LAB at Gachon University for research support
